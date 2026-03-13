@@ -38,6 +38,8 @@ class KOREATECHCGHEncoder:
         features: list[torch.Tensor] = []
 
         if self.config.include_rgb:
+            if rgb_raw.ndim == 3 and rgb_raw.shape[2] > 3:
+                rgb_raw = rgb_raw[:, :, :3]
             rgb = (
                 torch.from_numpy(rgb_raw).permute(2, 0, 1)
                 if rgb_raw.ndim == 3
@@ -45,6 +47,8 @@ class KOREATECHCGHEncoder:
             )
             features.append(rgb.float())
 
+        if depth_raw.ndim == 3:
+            depth_raw = depth_raw[:, :, 0]
         depth = torch.from_numpy(depth_raw).squeeze().float()
         z_map = depth * self.config.depth_range_m
         encoding_arg = self.phase_kernel * z_map

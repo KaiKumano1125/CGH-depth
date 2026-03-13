@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from .checkpoints import load_model_weights
+from .checkpoints import load_model_weights, resolve_inference_checkpoint
 from .config import ExperimentConfig
 from .encoders import KOREATECHCGHEncoder, _load_pyexr
 from .models import build_model
@@ -15,25 +15,33 @@ from .models import build_model
 def _load_ready_model(config: ExperimentConfig) -> tuple[torch.nn.Module, torch.device]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = build_model(config.model, config.encoder).to(device)
-    checkpoint_path = config.resolve_path(config.inference.checkpoint)
+    checkpoint_path = resolve_inference_checkpoint(config)
     load_model_weights(model, checkpoint_path, device)
     model.eval()
     return model, device
 
 
-def predict_single(config: ExperimentConfig, sample_id: str | None = None) -> tuple[np.ndarray, np.ndarray]:
+def predict_from_paths(
+    config: ExperimentConfig,
+    img_path: str | Path,
+    depth_path: str | Path,
+) -> tuple[np.ndarray, np.ndarray]:
     model, device = _load_ready_model(config)
     encoder = KOREATECHCGHEncoder(config.encoder)
-    sample = sample_id or config.inference.test_index
-
-    img_path = config.data_root / "test" / "img" / f"{sample}.exr"
-    depth_path = config.data_root / "test" / "depth" / f"{sample}.exr"
     x_input = encoder.encode(img_path, depth_path).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output = model(x_input).squeeze(0).cpu().numpy()
 
     return output[0], output[1]
+
+
+def predict_single(config: ExperimentConfig, sample_id: str | None = None) -> tuple[np.ndarray, np.ndarray]:
+    sample = sample_id or config.inference.test_index
+
+    img_path = config.data_root / "test" / "img" / f"{sample}.exr"
+    depth_path = config.data_root / "test" / "depth" / f"{sample}.exr"
+    return predict_from_paths(config, img_path, depth_path)
 
 
 def run_batch_inference(config: ExperimentConfig) -> Path:
