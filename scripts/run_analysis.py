@@ -85,7 +85,7 @@ def main() -> None:
 
     if args.sample_id:
         comparison = evaluate_single_sample(data_root, runs, args.sample_id, depths_m)
-        plot_path = output_dir / f"single_{args.sample_id}_comparison.png"
+        plot_path = output_dir / f"{args.sample_id}_comparison.png"
         plot_single_comparison(comparison, plot_path)
         print(f"Saved single-sample comparison plot: {plot_path}")
 

@@ -70,15 +70,23 @@ def _normalize_image(image: torch.Tensor) -> np.ndarray:
     return (image_np - image_min) / (image_max - image_min + 1e-8)
 
 
+def _phase_to_radians(phs: torch.Tensor, phase_normalized: bool) -> torch.Tensor:
+    if phase_normalized:
+        return phs * (2.0 * np.pi)
+    return phs
+
+
 def reconstruct_asm(
     amp: torch.Tensor,
     phs: torch.Tensor,
     z: float,
     pitch: float = 3.6e-6,
     wavelength: float = 638e-9,
+    phase_normalized: bool = True,
 ) -> torch.Tensor:
     res_y, res_x = amp.shape
-    u_hologram = torch.complex(amp * torch.cos(phs), amp * torch.sin(phs))
+    phase_radians = _phase_to_radians(phs, phase_normalized)
+    u_hologram = torch.complex(amp * torch.cos(phase_radians), amp * torch.sin(phase_radians))
     u_freq = torch.fft.fftshift(torch.fft.fft2(u_hologram))
 
     fy = torch.fft.fftfreq(res_y, d=pitch, device=amp.device)

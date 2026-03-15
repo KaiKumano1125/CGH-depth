@@ -11,7 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from cgh_depth.config import load_experiment_config
-from cgh_depth.inference import predict_single, run_batch_inference
+from cgh_depth.inference import predict_from_paths, predict_single, run_batch_inference
 
 
 def main() -> None:
@@ -23,6 +23,9 @@ def main() -> None:
         default=str(ROOT / "configs" / "experiments" / "only_frequency.toml"),
     )
     parser.add_argument("--batch", action="store_true")
+    parser.add_argument("--rgb-path")
+    parser.add_argument("--depth-path")
+    parser.add_argument("--output-stem")
     args = parser.parse_args()
 
     config = load_experiment_config(args.config)
@@ -32,10 +35,20 @@ def main() -> None:
         return
 
     pyexr = _load_pyexr()
-    amp, phs = predict_single(config)
+    if bool(args.rgb_path) != bool(args.depth_path):
+        raise ValueError("Provide both --rgb-path and --depth-path together for custom single-pair inference.")
+
+    if args.rgb_path and args.depth_path:
+        rgb_path = Path(args.rgb_path)
+        depth_path = Path(args.depth_path)
+        amp, phs = predict_from_paths(config, rgb_path, depth_path)
+        sample = args.output_stem or rgb_path.stem
+    else:
+        amp, phs = predict_single(config)
+        sample = config.inference.test_index
+
     config.result_dir.mkdir(parents=True, exist_ok=True)
     prefix = config.inference.prediction_prefix
-    sample = config.inference.test_index
     amp_path = config.result_dir / f"{prefix}_{sample}_amp.exr"
     phs_path = config.result_dir / f"{prefix}_{sample}_phs.exr"
     pyexr.write(str(amp_path), amp)
