@@ -187,8 +187,8 @@ def plot_single_comparison(
     display_indices = sorted({0, len(comparison.depths_m) // 2, len(comparison.depths_m) - 1})
     row_labels = list(comparison.visuals.keys())
 
-    fig = plt.figure(figsize=(5 * len(display_indices), 3.5 * (len(row_labels) + 1)))
-    gs = fig.add_gridspec(len(row_labels) + 1, len(display_indices))
+    fig = plt.figure(figsize=(5 * len(display_indices), 3.5 * (len(row_labels) + 2)))
+    gs = fig.add_gridspec(len(row_labels) + 2, len(display_indices))
 
     for row_idx, row_label in enumerate(row_labels):
         for col_idx, depth_idx in enumerate(display_indices):
@@ -197,16 +197,24 @@ def plot_single_comparison(
             ax.set_title(f"{row_label} @ {depth_labels[depth_idx]:.1f} mm")
             ax.axis("off")
 
-    ax_metrics = fig.add_subplot(gs[len(row_labels), :])
+    ax_psnr = fig.add_subplot(gs[len(row_labels), :])
+    ax_ssim = fig.add_subplot(gs[len(row_labels) + 1, :])
     styles = ["o-", "s-", "x-", "d-", "^-", "v-"]
     for style, (label, metrics) in zip(styles, comparison.metrics.items()):
-        ax_metrics.plot(depth_labels, metrics["psnr"], style, linewidth=2, label=f"{label} PSNR")
+        ax_psnr.plot(depth_labels, metrics["psnr"], style, linewidth=2, label=label)
+        ax_ssim.plot(depth_labels, metrics["ssim"], style, linewidth=2, label=label)
 
-    ax_metrics.set_title(f"PSNR by Depth for Sample {comparison.sample_id}")
-    ax_metrics.set_xlabel("Depth (mm)")
-    ax_metrics.set_ylabel("PSNR (dB)")
-    ax_metrics.grid(True, alpha=0.3)
-    ax_metrics.legend()
+    ax_psnr.set_title(f"PSNR by Depth for Sample {comparison.sample_id}")
+    ax_psnr.set_xlabel("Depth (mm)")
+    ax_psnr.set_ylabel("PSNR (dB)")
+    ax_psnr.grid(True, alpha=0.3)
+    ax_psnr.legend()
+
+    ax_ssim.set_title(f"SSIM by Depth for Sample {comparison.sample_id}")
+    ax_ssim.set_xlabel("Depth (mm)")
+    ax_ssim.set_ylabel("SSIM")
+    ax_ssim.grid(True, alpha=0.3)
+    ax_ssim.legend()
 
     fig.tight_layout()
     if output_path is not None:
