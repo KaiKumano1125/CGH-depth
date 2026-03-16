@@ -53,9 +53,11 @@ docs/
 scripts/
   train_experiment.py
   run_inference.py
+  run_analysis.py
 src/
   cgh_depth/
     __init__.py
+    analysis.py
     config.py
     checkpoints.py
     datasets.py
@@ -119,6 +121,22 @@ Examples:
 ```powershell
 .\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml
 .\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml --batch
+```
+
+[`scripts/run_analysis.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/scripts/run_analysis.py)
+
+- Command-line entrypoint for model comparison.
+- Compares predictions from multiple experiment configs against ground-truth test holograms.
+- Supports:
+  - single-sample comparison
+  - full batch comparison
+- Saves plots and CSV summaries into `results/analysis` by default.
+
+Examples:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --sample-id 5799
+.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --batch
 ```
 
 ### `src/cgh_depth`
@@ -208,6 +226,24 @@ Main functions:
 
 - `predict_single(config, sample_id=None)`
 - `run_batch_inference(config)`
+
+[`src/cgh_depth/analysis.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/analysis.py)
+
+- Reusable evaluation and comparison logic extracted from the old notebook analysis flow.
+- Includes:
+  - ASM reconstruction
+  - EXR loading for predictions and ground truth
+  - PSNR / SSIM comparison across depths
+  - single-sample comparison plots
+  - batch summary CSV and batch summary plots
+
+Main functions:
+
+- `prediction_run_from_config(config)`
+- `evaluate_single_sample(...)`
+- `evaluate_batch(...)`
+- `plot_single_comparison(...)`
+- `save_batch_summary(...)`
 
 ## How To Change Parameters
 
@@ -301,6 +337,41 @@ Batch:
 ```powershell
 .\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml --batch
 ```
+
+### 4. Compare models
+
+Single sample comparison:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --sample-id 5799
+```
+
+This saves a plot like:
+
+```text
+results/analysis/single_5799_comparison.png
+```
+
+Batch comparison over the whole test set:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --batch
+```
+
+This saves:
+
+- `results/analysis/holography_comparison_results.csv`
+- `results/analysis/comparison_plots.png`
+
+Qualitative comparison for an arbitrary RGB/depth EXR pair:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --rgb-path dataset/example/honney_rgb.exr --depth-path dataset/example/honney_dep.exr --depths-mm 5 10 15
+```
+
+This saves a side-by-side reconstruction plot such as:
+
+- `results/analysis/example/example_honney_rgb_comparison.png`
 
 ## Notebook Usage
 

@@ -3,7 +3,7 @@ experiment_name = "only_frequency_encoding"
 [paths]
 data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
 weight_dir = "weight/v2"
-result_dir = "results/engineered_only_frequency_encoding_predictions"
+result_dir = "results/engineered_6"
 log_dir = "logs"
 
 [encoder]
@@ -22,7 +22,7 @@ out_channels = 2
 base_channels = 64
 
 [train]
-batch_size = 8
+batch_size = 32
 learning_rate = 1e-4
 epochs = 100
 shuffle = true
