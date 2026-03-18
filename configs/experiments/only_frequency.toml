@@ -28,10 +28,10 @@ epochs = 100
 shuffle = true
 num_workers = 0
 checkpoint_every = 10
-resume_checkpoint = "weight/v2/unet_cgh_epoch_only_frequency_encoding_60.pth"
+resume_checkpoint = "weight/v2/only_frequency_encoding_epoch_60.pth"
 
 [inference]
-checkpoint = "weight/v2/unet_cgh_epoch_only_frequency_encoding_100.pth"
+checkpoint = "weight/v2/only_frequency_encoding_epoch_100.pth"
 test_index = "5799"
 batch_output_subdir = "test"
 prediction_prefix = "prediction_only_frequency_encoding"

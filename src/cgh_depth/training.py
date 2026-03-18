@@ -98,7 +98,7 @@ def run_training(config: ExperimentConfig) -> None:
 
         avg_val_loss = val_loss / len(val_loader)
         writer.add_scalar("epoch/val_loss", avg_val_loss, epoch)
-        scheduler.step(epoch_loss)
+        scheduler.step(avg_val_loss)
 
         with torch.no_grad():
             vis_amp = outputs[0, 0:1].detach().cpu()
