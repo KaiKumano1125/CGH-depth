@@ -1,0 +1,38 @@
+experiment_name = "baseline"
+
+[paths]
+data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
+weight_dir = "weight/v2"
+result_dir = "results/baseline"
+log_dir = "logs"
+
+[encoder]
+res = 512
+pitch = 3.6e-6
+wavelength = 638e-9
+depth_range_m = 0.0203336
+include_rgb = true
+include_depth = true
+include_freq_cos = false
+include_freq_sin = false
+
+
+[model]
+name = "simple_unet"
+out_channels = 2
+base_channels = 64
+
+[train]
+batch_size = 32
+learning_rate = 1e-4
+epochs = 100
+shuffle = true
+num_workers = 0
+checkpoint_every = 10
+resume_checkpoint = ""
+
+[inference]
+checkpoint = ""
+test_index = "5799"
+batch_output_subdir = "predictions"
+prediction_prefix = "prediction"
