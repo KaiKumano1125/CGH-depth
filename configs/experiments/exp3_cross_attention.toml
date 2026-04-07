@@ -1,0 +1,39 @@
+experiment_name = "exp3_cross_attention"
+
+[paths]
+data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
+weight_dir = "weight/v2"
+result_dir = "results/exp3_cross_attention"
+log_dir    = "logs"
+
+# Exp3: RGB + depth (main branch) + cos + sin (separate frequency encoder → cross-attention at bottleneck)
+[encoder]
+res           = 512
+pitch         = 3.6e-6
+wavelength    = 638e-9
+depth_range_m = 0.0203336
+include_rgb       = true
+include_depth     = true
+include_freq_cos  = true
+include_freq_sin  = true
+
+[model]
+name               = "simple_unet"
+out_channels       = 2
+base_channels      = 64
+use_cross_attention = true
+
+[train]
+batch_size        = 32
+learning_rate     = 1e-4
+epochs            = 100
+shuffle           = true
+num_workers       = 0
+checkpoint_every  = 10
+resume_checkpoint = ""
+
+[inference]
+checkpoint          = ""
+test_index          = "5799"
+batch_output_subdir = "predictions"
+prediction_prefix   = "pred_exp3"
