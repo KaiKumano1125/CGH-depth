@@ -24,7 +24,7 @@ base_channels      = 64
 use_cross_attention = false
 
 [train]
-batch_size        = 32
+batch_size        = 4
 learning_rate     = 1e-4
 epochs            = 100
 shuffle           = true
