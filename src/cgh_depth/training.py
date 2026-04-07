@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from .checkpoints import load_model_weights
 from .config import ExperimentConfig
@@ -65,12 +66,24 @@ def run_training(config: ExperimentConfig) -> None:
 
     config.weight_dir.mkdir(parents=True, exist_ok=True)
 
-    for epoch in range(start_epoch, config.train.epochs):
+    epoch_bar = tqdm(
+        range(start_epoch, config.train.epochs),
+        desc=f"[{config.experiment_name}]",
+        unit="epoch",
+    )
+
+    for epoch in epoch_bar:
         model.train()
         running_loss = 0.0
         epoch_start = time.time()
 
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
+        train_bar = tqdm(
+            train_loader,
+            desc=f"  Train E{epoch + 1:03d}",
+            leave=False,
+            unit="batch",
+        )
+        for batch_idx, (inputs, targets) in enumerate(train_bar):
             inputs = inputs.to(device)
             targets = targets.to(device)
 
@@ -84,25 +97,22 @@ def run_training(config: ExperimentConfig) -> None:
             global_step = epoch * len(train_loader) + batch_idx
             writer.add_scalar("batch/loss", loss.item(), global_step)
 
-            if batch_idx % 10 == 0:
-                print(
-                    f"  Epoch {epoch + 1}/{config.train.epochs} "
-                    f"batch {batch_idx}/{len(train_loader)} "
-                    f"loss={loss.item():.6f}",
-                    flush=True,
-                )
+            train_bar.set_postfix(loss=f"{loss.item():.6f}")
 
         epoch_loss = running_loss / len(train_loader)
         writer.add_scalar("epoch/train_loss", epoch_loss, epoch)
 
         model.eval()
         val_loss = 0.0
+        val_bar = tqdm(val_loader, desc=f"  Val   E{epoch + 1:03d}", leave=False, unit="batch")
         with torch.no_grad():
-            for inputs, targets in val_loader:
+            for inputs, targets in val_bar:
                 inputs = inputs.to(device)
                 targets = targets.to(device)
                 outputs = model(inputs)
-                val_loss += criterion(outputs, targets).item()
+                batch_val_loss = criterion(outputs, targets).item()
+                val_loss += batch_val_loss
+                val_bar.set_postfix(loss=f"{batch_val_loss:.6f}")
 
         avg_val_loss = val_loss / len(val_loader)
         writer.add_scalar("epoch/val_loss", avg_val_loss, epoch)
@@ -115,19 +125,17 @@ def run_training(config: ExperimentConfig) -> None:
             writer.add_image("visuals/predicted_phase", vis_phs, epoch)
 
         elapsed = time.time() - epoch_start
-        print(
-            f"Epoch {epoch + 1}/{config.train.epochs} "
-            f"- train_loss={epoch_loss:.6f} "
-            f"- val_loss={avg_val_loss:.6f} "
-            f"- time={elapsed:.2f}s",
-            flush=True,
+        epoch_bar.set_postfix(
+            train=f"{epoch_loss:.6f}",
+            val=f"{avg_val_loss:.6f}",
+            time=f"{elapsed:.1f}s",
         )
 
         if (epoch + 1) % config.train.checkpoint_every == 0:
             checkpoint_name = f"{config.experiment_name}_epoch_{epoch + 1}.pth"
             checkpoint_path = config.weight_dir / checkpoint_name
             torch.save(model.state_dict(), checkpoint_path)
-            print(f"Saved checkpoint: {checkpoint_path}")
+            tqdm.write(f"  Saved checkpoint: {checkpoint_path}")
 
     writer.close()
 
