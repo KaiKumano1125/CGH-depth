@@ -2,7 +2,7 @@ experiment_name = "exp2_concat"
 
 [paths]
 data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
-weight_dir = "weight/v2"
+weight_dir = "weight/v3"
 result_dir = "results/exp2_concat"
 log_dir    = "logs"
 

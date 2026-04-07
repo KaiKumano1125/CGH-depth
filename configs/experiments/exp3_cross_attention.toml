@@ -2,7 +2,7 @@ experiment_name = "exp3_cross_attention"
 
 [paths]
 data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
-weight_dir = "weight/v2"
+weight_dir = "weight/v3"
 result_dir = "results/exp3_cross_attention"
 log_dir    = "logs"
 

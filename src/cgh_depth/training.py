@@ -84,6 +84,14 @@ def run_training(config: ExperimentConfig) -> None:
             global_step = epoch * len(train_loader) + batch_idx
             writer.add_scalar("batch/loss", loss.item(), global_step)
 
+            if batch_idx % 10 == 0:
+                print(
+                    f"  Epoch {epoch + 1}/{config.train.epochs} "
+                    f"batch {batch_idx}/{len(train_loader)} "
+                    f"loss={loss.item():.6f}",
+                    flush=True,
+                )
+
         epoch_loss = running_loss / len(train_loader)
         writer.add_scalar("epoch/train_loss", epoch_loss, epoch)
 
@@ -111,7 +119,8 @@ def run_training(config: ExperimentConfig) -> None:
             f"Epoch {epoch + 1}/{config.train.epochs} "
             f"- train_loss={epoch_loss:.6f} "
             f"- val_loss={avg_val_loss:.6f} "
-            f"- time={elapsed:.2f}s"
+            f"- time={elapsed:.2f}s",
+            flush=True,
         )
 
         if (epoch + 1) % config.train.checkpoint_every == 0:

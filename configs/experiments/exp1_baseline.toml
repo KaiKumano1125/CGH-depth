@@ -2,7 +2,7 @@ experiment_name = "exp1_baseline"
 
 [paths]
 data_root = "dataset/KOREATECH-CGH-512-3.6Mu"
-weight_dir = "weight/v2"
+weight_dir = "weight/v3"
 result_dir = "results/exp1_baseline"
 log_dir    = "logs"
 
