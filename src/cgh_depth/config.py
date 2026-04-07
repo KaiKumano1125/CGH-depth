@@ -50,6 +50,7 @@ class ModelConfig:
     name: str
     out_channels: int
     base_channels: int
+    use_cross_attention: bool = False
 
 
 @dataclass(frozen=True)
@@ -143,6 +144,7 @@ def load_experiment_config(config_path: str | Path) -> ExperimentConfig:
             name=str(model["name"]),
             out_channels=int(model["out_channels"]),
             base_channels=int(model["base_channels"]),
+            use_cross_attention=bool(model.get("use_cross_attention", False)),
         ),
         train=TrainConfig(
             batch_size=int(train["batch_size"]),

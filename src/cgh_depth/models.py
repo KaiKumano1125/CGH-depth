@@ -173,7 +173,14 @@ def build_model(model_config: ModelConfig, encoder_config: EncoderConfig) -> nn.
     # [RGB (0-2)] [depth (3)] [freq_cos (4)] [freq_sin (5)]
     freq_start = (3 if encoder_config.include_rgb else 0) + (1 if encoder_config.include_depth else 0)
     freq_count = int(encoder_config.include_freq_cos) + int(encoder_config.include_freq_sin)
-    freq_slice = (freq_start, freq_start + freq_count) if freq_count > 0 else None
+
+    # Only wire up the separate frequency branch when explicitly requested.
+    # Exp2 (concat) has freq channels but use_cross_attention=False → freq_slice=None.
+    freq_slice = (
+        (freq_start, freq_start + freq_count)
+        if freq_count > 0 and model_config.use_cross_attention
+        else None
+    )
 
     return SimpleUNet(
         in_channels=encoder_config.in_channels,
