@@ -49,16 +49,22 @@ class FrequencyContextEncoder(nn.Module):
 
 class CrossAttentionBlock(nn.Module):
     """
-    Cross-attention at the UNet bottleneck.
+    Cross-attention at the UNet bottleneck with spatial pooling for efficiency.
       Q   : main encoder bottleneck features (x5), shape (B, C, H, W).
       K/V : frequency context from FrequencyContextEncoder, same shape.
 
-    Both tensors are flattened to (B, H*W, C) token sequences before attention.
-    Uses pre-norm, residual connections, and a position-wise feed-forward layer.
+    Both Q and K/V are spatially pooled by pool_factor before attention
+    (e.g. 32×32 → 16×16 = 256 tokens instead of 1024), reducing attention
+    cost 16× (N² scaling). After attention, the result is upsampled back
+    and added as a residual to the full-resolution x5.
     """
 
-    def __init__(self, channels: int, num_heads: int = 8):
+    def __init__(self, channels: int, num_heads: int = 8, pool_factor: int = 2):
         super().__init__()
+        self.pool_factor = pool_factor
+        self.pool = nn.AvgPool2d(pool_factor)
+        self.upsample = nn.Upsample(scale_factor=pool_factor, mode="bilinear", align_corners=False)
+
         self.norm_q = nn.LayerNorm(channels)
         self.norm_kv = nn.LayerNorm(channels)
         self.attn = nn.MultiheadAttention(channels, num_heads, batch_first=True)
@@ -71,10 +77,15 @@ class CrossAttentionBlock(nn.Module):
 
     def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
-        x_seq = x.flatten(2).permute(0, 2, 1)          # (B, H*W, C)
-        ctx_seq = context.flatten(2).permute(0, 2, 1)   # (B, H*W, C)
 
-        # Cross-attention with residual
+        # Pool both down: 32×32 → 16×16 (256 tokens instead of 1024)
+        x_pooled = self.pool(x)
+        ctx_pooled = self.pool(context)
+
+        x_seq = x_pooled.flatten(2).permute(0, 2, 1)       # (B, 256, C)
+        ctx_seq = ctx_pooled.flatten(2).permute(0, 2, 1)    # (B, 256, C)
+
+        # Cross-attention with residual (at reduced resolution)
         attn_out, _ = self.attn(
             self.norm_q(x_seq),
             self.norm_kv(ctx_seq),
@@ -85,7 +96,14 @@ class CrossAttentionBlock(nn.Module):
         # Feed-forward with residual
         x_seq = x_seq + self.ff(self.norm_ff(x_seq))
 
-        return x_seq.permute(0, 2, 1).reshape(B, C, H, W)
+        # Reshape back and upsample to original resolution
+        h_small = H // self.pool_factor
+        w_small = W // self.pool_factor
+        x_refined = x_seq.permute(0, 2, 1).reshape(B, C, h_small, w_small)
+        x_refined = self.upsample(x_refined)   # 16×16 → 32×32
+
+        # Residual onto full-resolution x5
+        return x + x_refined
 
 
 class SimpleUNet(nn.Module):
