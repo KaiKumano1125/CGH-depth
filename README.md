@@ -1,405 +1,242 @@
-# CGH-depth
+# CGH-Depth
 
-This repository now has a small reusable experiment scaffold so training and inference do not need to live entirely inside notebooks.
+A deep learning pipeline for Computer-Generated Holography (CGH) that predicts hologram **amplitude** and **phase** from RGB + depth images, using physics-aware frequency encoding and a bottleneck cross-attention mechanism.
 
-The main idea is:
+---
 
-- keep reusable logic in `src/cgh_depth`
-- keep experiment settings in `configs`
-- use `scripts` for training and inference entrypoints
-- use notebooks mainly for analysis and visualization
+## Project Goal
+
+Given an RGB image and a depth map, predict the amplitude and phase of a hologram that can be physically reconstructed at multiple depths using the **Angular Spectrum Method (ASM)**.
+
+---
+
+## Method Overview
+
+Three experiments are compared in this project:
+
+| Experiment | Input channels | Cross-Attention | Description |
+|---|---|---|---|
+| Exp1 — Baseline | RGB + depth (4ch) | OFF | Standard UNet, no physics encoding |
+| Exp2 — Concat | RGB + depth + cos + sin (6ch) | OFF | Physics channels mixed into main encoder |
+| Exp3 — Cross-Attention | RGB + depth + cos + sin (6ch) | ON | Physics channels via separate encoder, injected at bottleneck |
+
+The key idea of **Exp3**: the cos/sin frequency channels (derived from the ASM phase kernel `2π√(1/λ² - fx² - fy²) × z`) are processed by a dedicated lightweight encoder, then cross-attended at the UNet bottleneck. This keeps physics information pure until the highest semantic abstraction level.
+
+### Lightweight Cross-Attention Architecture
+
+```
+Input (B, 6, 512, 512)
+│
+├── Main UNet Encoder (all 6 channels)
+│   inc → down1 → down2 → down3 → down4
+│   → (B, 1024, 32, 32)   ← bottleneck x5
+│
+├── FrequencyContextEncoder (cos + sin only)
+│   AdaptiveAvgPool(32×32) → Conv1×1 → BN → ReLU
+│   → (B, 1024, 32, 32)   ← freq_context
+│
+└── CrossAttentionBlock
+    Pool: 32×32 → 8×8 (64 tokens)
+    Project: 1024 → 256 (inner_dim)
+    Cross-Attention (Q=x5, K/V=freq_context), 4 heads
+    Project back: 256 → 1024
+    Upsample: 8×8 → 32×32
+    Residual: x5 = x5 + refined
+│
+└── UNet Decoder with skip connections → (B, 2, 512, 512)
+    channel 0: amplitude
+    channel 1: phase
+```
+
+---
+
+## Folder Structure
+
+```
+configs/
+  experiments/
+    exp1_baseline.toml          ← Exp1: 4ch, no attention
+    exp2_concat.toml            ← Exp2: 6ch, no attention
+    exp3_cross_attention.toml   ← Exp3: 6ch, cross-attention (proposed)
+    base.toml                   ← original baseline config
+scripts/
+  train_experiment.py           ← train a single experiment
+  run_inference.py              ← run inference for a single experiment
+  run_analysis.py               ← compare models, save plots and CSV
+  run_comparison.py             ← train + compare all 3 experiments
+  run_reconstruct_asm.py        ← standalone ASM reconstruction
+src/cgh_depth/
+  config.py                     ← TOML config loader → frozen dataclasses
+  encoders.py                   ← physics-aware input encoder (cos/sin + RGB + depth)
+  datasets.py                   ← KOREATECHHolographyDataset
+  models.py                     ← SimpleUNet + FrequencyContextEncoder + CrossAttentionBlock
+  training.py                   ← training loop with tqdm progress bars + TensorBoard
+  checkpoints.py                ← checkpoint save/load, epoch inference from filename
+  inference.py                  ← single-sample and batch prediction
+  analysis.py                   ← ASM reconstruction, PSNR/SSIM evaluation, plots
+dataset/
+  KOREATECH-CGH-512-3.6Mu/     ← not tracked by git
+    train/  validation/  test/
+      img/  depth/  amp/  phs/
+weight/
+  v3/                           ← not tracked by git
+    exp1_baseline_epoch_100.pth
+    exp3_cross_attention_epoch_100.pth
+results/
+  analysis/
+    batch/                      ← batch PSNR/SSIM CSV + plot
+    samples/{id}/               ← per-sample comparison + hologram grid
+```
+
+---
 
 ## Quick Start
 
-Use the project virtual environment. The system `python` on this machine does not include `pyexr`, but the repo virtualenv does.
+Activate the virtual environment:
 
-```powershell
-.\.venv\Scripts\python.exe
+```bash
+.venv\Scripts\activate
 ```
 
-Check that the dataset and encoder wiring works:
+Check dataset loads correctly:
 
-```powershell
-.\.venv\Scripts\python.exe scripts/train_experiment.py --inspect-only
+```bash
+python scripts/train_experiment.py --config configs/experiments/exp1_baseline.toml --inspect-only
 ```
 
-Run training:
+---
 
-```powershell
-.\.venv\Scripts\python.exe scripts/train_experiment.py --config configs/experiments/only_frequency.toml
+## Training
+
+Train each experiment one by one:
+
+```bash
+# Exp1 — Baseline
+python scripts/train_experiment.py --config configs/experiments/exp1_baseline.toml
+
+# Exp2 — Concat
+python scripts/train_experiment.py --config configs/experiments/exp2_concat.toml
+
+# Exp3 — Cross-Attention
+python scripts/train_experiment.py --config configs/experiments/exp3_cross_attention.toml
 ```
 
-Run single-image inference:
+Training shows progress bars per batch and per epoch. Checkpoints are saved to `weight/v3/` every 10 epochs.
 
-```powershell
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml
+**Resume from checkpoint** — set in config:
+```toml
+resume_checkpoint = "weight/v3/exp1_baseline_epoch_50.pth"
 ```
 
-Run batch inference on the whole test set:
+---
 
-```powershell
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml --batch
+## Inference
+
+```bash
+# Single sample
+python scripts/run_inference.py --config configs/experiments/exp1_baseline.toml
+
+# Full test set
+python scripts/run_inference.py --config configs/experiments/exp1_baseline.toml --batch
+
+# Custom RGB + depth pair
+python scripts/run_inference.py \
+  --config configs/experiments/exp3_cross_attention.toml \
+  --rgb-path dataset/example/rgb.exr \
+  --depth-path dataset/example/depth.exr
 ```
 
-## Folder Guide
+---
 
-```text
-configs/
-  base.toml
-  experiments/
-    only_frequency.toml
-docs/
-  project_structure.md
-scripts/
-  train_experiment.py
-  run_inference.py
-  run_analysis.py
-src/
-  cgh_depth/
-    __init__.py
-    analysis.py
-    config.py
-    checkpoints.py
-    datasets.py
-    encoders.py
-    inference.py
-    models.py
-    training.py
-notebooks/
-  experiments/
+## Analysis & Comparison
+
+**PSNR/SSIM comparison across depths (batch):**
+```bash
+python scripts/run_analysis.py \
+  --config configs/experiments/exp1_baseline.toml \
+  --config configs/experiments/exp3_cross_attention.toml \
+  --batch
 ```
 
-## What Each New File Does
-
-### `configs`
-
-[`configs/base.toml`](c:/Users/Kai%20Kumano/workspace/CGH-depth/configs/base.toml)
-
-- Template for shared settings.
-- Holds default-style values for paths, encoder settings, model settings, training settings, and inference settings.
-- Useful when you want to create more experiment configs later, such as `baseline.toml` or `proposed.toml`.
-
-[`configs/experiments/only_frequency.toml`](c:/Users/Kai%20Kumano/workspace/CGH-depth/configs/experiments/only_frequency.toml)
-
-- Main config for the current only-frequency experiment.
-- Controls:
-  - dataset path
-  - output folders
-  - encoder channels
-  - model size
-  - training hyperparameters
-  - resume checkpoint
-  - inference checkpoint
-  - test sample id
-
-### `scripts`
-
-[`scripts/train_experiment.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/scripts/train_experiment.py)
-
-- Command-line entrypoint for training.
-- Loads a TOML config.
-- Can either:
-  - inspect the dataset shape with `--inspect-only`
-  - run full training
-
-Examples:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/train_experiment.py --inspect-only
-.\.venv\Scripts\python.exe scripts/train_experiment.py --config configs/experiments/only_frequency.toml
+**Single sample — metrics + hologram grid:**
+```bash
+python scripts/run_analysis.py \
+  --config configs/experiments/exp1_baseline.toml \
+  --config configs/experiments/exp3_cross_attention.toml \
+  --sample-id 5799 --holograms
 ```
 
-[`scripts/run_inference.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/scripts/run_inference.py)
-
-- Command-line entrypoint for inference.
-- Loads the config and trained checkpoint.
-- By default it predicts one sample defined by `inference.test_index`.
-- With `--batch`, it predicts the whole test set.
-
-Examples:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml --batch
+**Control which depths appear in the hologram grid:**
+```bash
+  --display-depths-mm 5 10 15
 ```
 
-[`scripts/run_analysis.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/scripts/run_analysis.py)
-
-- Command-line entrypoint for model comparison.
-- Compares predictions from multiple experiment configs against ground-truth test holograms.
-- Supports:
-  - single-sample comparison
-  - full batch comparison
-- Saves plots and CSV summaries into `results/analysis` by default.
-
-Examples:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --sample-id 5799
-.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --batch
+Output is saved to:
+```
+results/analysis/
+  batch/
+    comparison_plots.png
+    holography_comparison_results.csv
+  samples/5799/
+    comparison.png        ← PSNR/SSIM curves
+    hologram_grid.png     ← visual reconstruction grid
 ```
 
-### `src/cgh_depth`
-
-[`src/cgh_depth/__init__.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/__init__.py)
-
-- Small package entrypoint.
-- Re-exports the config loader and config object.
-
-[`src/cgh_depth/config.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/config.py)
-
-- Loads TOML config files.
-- Converts raw config values into structured dataclasses.
-- Resolves relative paths like `dataset/...` into full project paths.
-
-Use this when you want to load config inside a script or notebook:
-
-```python
-from cgh_depth.config import load_experiment_config
-
-cfg = load_experiment_config("configs/experiments/only_frequency.toml")
+The hologram grid layout:
+```
+              5.0 mm      10.0 mm     15.0 mm
+Ground Truth  [image]     [image]     [image]
+Exp1 Baseline [image]     [image]     [image]
+Exp3 Cross... [image]     [image]     [image]
 ```
 
-[`src/cgh_depth/encoders.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/encoders.py)
+---
 
-- Contains `KOREATECHCGHEncoder`.
-- Loads EXR files.
-- Builds the frequency-based input features.
-- Uses encoder config values like:
-  - `res`
-  - `pitch`
-  - `wavelength`
-  - `depth_range_m`
-  - which channels to include
+## Config Parameters
 
-For the current config, the encoder creates 6 input channels:
+```toml
+[encoder]
+res           = 512        # image resolution
+pitch         = 3.6e-6     # pixel pitch (m)
+wavelength    = 638e-9     # light wavelength (m)
+depth_range_m = 0.0203336  # max scene depth in meters (~20.3mm)
+include_rgb       = true
+include_depth     = true
+include_freq_cos  = true   # ASM cos encoding
+include_freq_sin  = true   # ASM sin encoding
 
-- RGB: 3
-- depth: 1
-- frequency cosine: 1
-- frequency sine: 1
+[model]
+name               = "simple_unet"
+out_channels       = 2          # amplitude + phase
+base_channels      = 64         # UNet width (bottleneck = 64×16 = 1024)
+use_cross_attention = true      # Exp3 only
 
-[`src/cgh_depth/datasets.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/datasets.py)
+[train]
+batch_size        = 4
+learning_rate     = 1e-4
+epochs            = 100
+checkpoint_every  = 10
+resume_checkpoint = ""          # set to resume from a checkpoint
 
-- Contains `KOREATECHHolographyDataset`.
-- Reads a split folder like `train` or `validation`.
-- Uses the encoder to build the model input.
-- Loads amplitude and phase as the target tensor.
-
-[`src/cgh_depth/models.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/models.py)
-
-- Contains:
-  - `DoubleConv`
-  - `SimpleUNet`
-  - `build_model`
-- `build_model(...)` uses the config to choose the model and input channel count.
-
-[`src/cgh_depth/checkpoints.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/checkpoints.py)
-
-- Handles checkpoint loading.
-- Also tries to infer the start epoch from the checkpoint filename.
-
-[`src/cgh_depth/training.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/training.py)
-
-- Main training logic.
-- Creates dataloaders.
-- Builds the model.
-- Runs train and validation loops.
-- Logs to TensorBoard.
-- Saves checkpoints every `checkpoint_every` epochs.
-
-Main functions:
-
-- `create_dataloaders(config)`
-- `inspect_dataset(config)`
-- `run_training(config)`
-
-[`src/cgh_depth/inference.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/inference.py)
-
-- Main inference logic.
-- Loads the trained model.
-- Runs either:
-  - single-sample prediction
-  - batch prediction for all test images
-
-Main functions:
-
-- `predict_single(config, sample_id=None)`
-- `run_batch_inference(config)`
-
-[`src/cgh_depth/analysis.py`](c:/Users/Kai%20Kumano/workspace/CGH-depth/src/cgh_depth/analysis.py)
-
-- Reusable evaluation and comparison logic extracted from the old notebook analysis flow.
-- Includes:
-  - ASM reconstruction
-  - EXR loading for predictions and ground truth
-  - PSNR / SSIM comparison across depths
-  - single-sample comparison plots
-  - batch summary CSV and batch summary plots
-
-Main functions:
-
-- `prediction_run_from_config(config)`
-- `evaluate_single_sample(...)`
-- `evaluate_batch(...)`
-- `plot_single_comparison(...)`
-- `save_batch_summary(...)`
-
-## How To Change Parameters
-
-The main place to edit experiment settings is:
-
-[`configs/experiments/only_frequency.toml`](c:/Users/Kai%20Kumano/workspace/CGH-depth/configs/experiments/only_frequency.toml)
-
-### Common settings you will likely change
-
-`[paths]`
-
-- `data_root`: where the dataset is
-- `weight_dir`: where checkpoints are saved
-- `result_dir`: where inference outputs are saved
-- `log_dir`: where TensorBoard logs are written
-
-`[encoder]`
-
-- `res`: input resolution
-- `pitch`: pixel pitch
-- `wavelength`: light wavelength
-- `depth_range_m`: depth scaling used for `z_map`
-- `include_rgb`
-- `include_depth`
-- `include_freq_cos`
-- `include_freq_sin`
-
-`[model]`
-
-- `name`: currently `simple_unet`
-- `out_channels`: currently 2 for amplitude and phase
-- `base_channels`: width of the U-Net
-
-`[train]`
-
-- `batch_size`
-- `learning_rate`
-- `epochs`
-- `shuffle`
-- `num_workers`
-- `checkpoint_every`
-- `resume_checkpoint`
-
-`[inference]`
-
-- `checkpoint`: model weights to load
-- `test_index`: sample id used for single-image inference
-- `batch_output_subdir`: folder name under `result_dir` for batch outputs
-- `prediction_prefix`: file prefix for saved EXRs
-
-## Typical Workflow
-
-### 1. Inspect shapes first
-
-This is the safest quick test after changing encoder settings.
-
-```powershell
-.\.venv\Scripts\python.exe scripts/train_experiment.py --inspect-only
+[inference]
+checkpoint          = "weight/v3/exp1_baseline_epoch_100.pth"
+test_index          = "5799"
+batch_output_subdir = "predictions"
+prediction_prefix   = "pred_exp1"
 ```
 
-Expected current result:
+---
 
-```text
-Input shape: torch.Size([8, 6, 512, 512])
-Target shape: torch.Size([8, 2, 512, 512])
+## Evaluation Method
+
+PSNR and SSIM are **not** computed on raw amplitude/phase. They are computed on the **ASM-reconstructed intensity image** at each depth:
+
+```
+predicted amp + phs
+      ↓  ASM propagation at depth z
+intensity image at z
+      ↓  compare with ground truth intensity
+PSNR / SSIM
 ```
 
-### 2. Train
-
-```powershell
-.\.venv\Scripts\python.exe scripts/train_experiment.py --config configs/experiments/only_frequency.toml
-```
-
-Training will:
-
-- load the train and validation splits
-- resume from `resume_checkpoint` if it exists
-- save new checkpoints into `weight/v2`
-- log TensorBoard files into `logs`
-
-### 3. Run inference
-
-Single sample:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml
-```
-
-Batch:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_inference.py --config configs/experiments/only_frequency.toml --batch
-```
-
-### 4. Compare models
-
-Single sample comparison:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --sample-id 5799
-```
-
-This saves a plot like:
-
-```text
-results/analysis/single_5799_comparison.png
-```
-
-Batch comparison over the whole test set:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --batch
-```
-
-This saves:
-
-- `results/analysis/holography_comparison_results.csv`
-- `results/analysis/comparison_plots.png`
-
-Qualitative comparison for an arbitrary RGB/depth EXR pair:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/run_analysis.py --config configs/experiments/base.toml --config configs/experiments/only_frequency.toml --rgb-path dataset/example/honney_rgb.exr --depth-path dataset/example/honney_dep.exr --depths-mm 5 10 15
-```
-
-This saves a side-by-side reconstruction plot such as:
-
-- `results/analysis/example/example_honney_rgb_comparison.png`
-
-## Notebook Usage
-
-You can now keep notebooks thin and use them mainly for checking outputs, plotting, and experiments.
-
-Example:
-
-```python
-from pathlib import Path
-import sys
-
-sys.path.insert(0, str(Path.cwd().parents[1] / "src"))
-
-from cgh_depth.config import load_experiment_config
-from cgh_depth.training import inspect_dataset
-from cgh_depth.inference import predict_single
-
-cfg = load_experiment_config("configs/experiments/only_frequency.toml")
-inspect_dataset(cfg)
-amp, phs = predict_single(cfg)
-```
-
-## Recommended Next Step
-
-The current notebook [`notebooks/experiments/proposed-feature-encoding-only-frequency-encoding.ipynb`](c:/Users/Kai%20Kumano/workspace/CGH-depth/notebooks/experiments/proposed-feature-encoding-only-frequency-encoding.ipynb) still contains old inline code. A good next cleanup would be to replace most of that notebook with:
-
-- config loading
-- one or two calls into `cgh_depth`
-- analysis and visualization cells only
-
-That would make the notebook much easier to maintain.
+This is the physically correct evaluation since hologram quality depends on how the light reconstructs at a given focal plane.
