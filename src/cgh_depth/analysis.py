@@ -223,6 +223,44 @@ def plot_single_comparison(
     return fig
 
 
+def plot_hologram_grid(
+    comparison: SingleComparisonResult,
+    output_path: Path | None = None,
+) -> plt.Figure:
+    """
+    Separate grid of reconstructed hologram images.
+    Rows = models (GroundTruth, Exp1, Exp3, ...)
+    Columns = all depths
+    """
+    depth_labels = [f"{z * 1000.0:.1f} mm" for z in comparison.depths_m]
+    row_labels = list(comparison.visuals.keys())
+    n_rows = len(row_labels)
+    n_cols = len(comparison.depths_m)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.5 * n_cols, 2.8 * n_rows))
+
+    if n_rows == 1:
+        axes = [axes]
+    if n_cols == 1:
+        axes = [[ax] for ax in axes]
+
+    for row_idx, row_label in enumerate(row_labels):
+        for col_idx, depth_label in enumerate(depth_labels):
+            ax = axes[row_idx][col_idx]
+            ax.imshow(comparison.visuals[row_label][col_idx], cmap="gray")
+            ax.axis("off")
+            if row_idx == 0:
+                ax.set_title(depth_label, fontsize=9)
+        axes[row_idx][0].set_ylabel(row_label, fontsize=9)
+
+    fig.suptitle(f"Reconstructed Holograms — Sample {comparison.sample_id}", fontsize=13)
+    fig.tight_layout()
+    if output_path is not None:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path, dpi=200)
+    return fig
+
+
 def compare_input_pair(
     configs: Iterable[ExperimentConfig],
     img_path: Path,
@@ -332,22 +370,18 @@ def plot_batch_summary(dataframe: pd.DataFrame, labels: Iterable[str], output_pa
     styles = ["o", "s", "x", "d", "^", "v"]
 
     for style, label in zip(styles, labels):
-        ax_psnr.errorbar(
+        ax_psnr.plot(
             d_mm,
             dataframe[f"{label}_PSNR_Mean"],
-            yerr=dataframe[f"{label}_PSNR_Std"],
-            fmt=f"{style}-",
+            f"{style}-",
             linewidth=2,
-            capsize=4,
             label=label,
         )
-        ax_ssim.errorbar(
+        ax_ssim.plot(
             d_mm,
             dataframe[f"{label}_SSIM_Mean"],
-            yerr=dataframe[f"{label}_SSIM_Std"],
-            fmt=f"{style}-",
+            f"{style}-",
             linewidth=2,
-            capsize=4,
             label=label,
         )
 
