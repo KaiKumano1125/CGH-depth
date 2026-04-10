@@ -24,23 +24,19 @@ class DoubleConv(nn.Module):
 
 class FrequencyContextEncoder(nn.Module):
     """
-    Lightweight parallel encoder for frequency (cos/sin) input channels.
-    Mirrors the main encoder's 4 downsampling stages to produce features at
-    the same bottleneck resolution (input_res / 16) for cross-attention.
+    Lightweight frequency context encoder (Option C).
+    Replaces the heavy 4-stage parallel UNet encoder with a single
+    AdaptiveAvgPool + Conv1x1 projection.
+    cos/sin (B, 2, 512, 512) → pool to (B, 2, 32, 32) → conv → (B, C, 32, 32)
     """
 
     def __init__(self, freq_channels: int, out_channels: int):
         super().__init__()
-        mid = out_channels // 4
         self.net = nn.Sequential(
-            DoubleConv(freq_channels, mid),
-            nn.MaxPool2d(2),
-            DoubleConv(mid, mid * 2),
-            nn.MaxPool2d(2),
-            DoubleConv(mid * 2, mid * 4),
-            nn.MaxPool2d(2),
-            DoubleConv(mid * 4, out_channels),
-            nn.MaxPool2d(2),
+            nn.AdaptiveAvgPool2d((32, 32)),
+            nn.Conv2d(freq_channels, out_channels, kernel_size=1, bias=False),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -49,60 +45,67 @@ class FrequencyContextEncoder(nn.Module):
 
 class CrossAttentionBlock(nn.Module):
     """
-    Cross-attention at the UNet bottleneck with spatial pooling for efficiency.
-      Q   : main encoder bottleneck features (x5), shape (B, C, H, W).
-      K/V : frequency context from FrequencyContextEncoder, same shape.
+    Lightweight cross-attention at the UNet bottleneck (Option A + B).
 
-    Both Q and K/V are spatially pooled by pool_factor before attention
-    (e.g. 32×32 → 16×16 = 256 tokens instead of 1024), reducing attention
-    cost 16× (N² scaling). After attention, the result is upsampled back
-    and added as a residual to the full-resolution x5.
+    Option A — pool_factor=4: attend on 8×8=64 tokens instead of 32×32=1024.
+               Reduces attention cost by (1024/64)² = 256×.
+    Option B — inner_dim: project channels down for Q/K/V (e.g. 1024→256),
+               then project back. Reduces attention op size 4×.
+
+    After attention, upsampled result is added as residual to full-res x5.
     """
 
-    def __init__(self, channels: int, num_heads: int = 8, pool_factor: int = 2):
+    def __init__(self, channels: int, num_heads: int = 4, pool_factor: int = 4, inner_dim: int = 256):
         super().__init__()
         self.pool_factor = pool_factor
         self.pool = nn.AvgPool2d(pool_factor)
         self.upsample = nn.Upsample(scale_factor=pool_factor, mode="bilinear", align_corners=False)
 
-        self.norm_q = nn.LayerNorm(channels)
-        self.norm_kv = nn.LayerNorm(channels)
-        self.attn = nn.MultiheadAttention(channels, num_heads, batch_first=True)
-        self.norm_ff = nn.LayerNorm(channels)
+        # Project down to inner_dim for Q/K/V (Option B)
+        self.proj_q = nn.Linear(channels, inner_dim)
+        self.proj_kv = nn.Linear(channels, inner_dim)
+        self.proj_out = nn.Linear(inner_dim, channels)
+
+        self.norm_q = nn.LayerNorm(inner_dim)
+        self.norm_kv = nn.LayerNorm(inner_dim)
+        self.attn = nn.MultiheadAttention(inner_dim, num_heads, batch_first=True)
+        self.norm_ff = nn.LayerNorm(inner_dim)
         self.ff = nn.Sequential(
-            nn.Linear(channels, channels * 4),
+            nn.Linear(inner_dim, inner_dim * 4),
             nn.GELU(),
-            nn.Linear(channels * 4, channels),
+            nn.Linear(inner_dim * 4, inner_dim),
         )
 
     def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
         B, C, H, W = x.shape
 
-        # Pool both down: 32×32 → 16×16 (256 tokens instead of 1024)
+        # Option A: pool 32×32 → 8×8 (64 tokens)
         x_pooled = self.pool(x)
         ctx_pooled = self.pool(context)
 
-        x_seq = x_pooled.flatten(2).permute(0, 2, 1)       # (B, 256, C)
-        ctx_seq = ctx_pooled.flatten(2).permute(0, 2, 1)    # (B, 256, C)
+        x_seq = x_pooled.flatten(2).permute(0, 2, 1)       # (B, 64, C)
+        ctx_seq = ctx_pooled.flatten(2).permute(0, 2, 1)    # (B, 64, C)
 
-        # Cross-attention with residual (at reduced resolution)
-        attn_out, _ = self.attn(
-            self.norm_q(x_seq),
-            self.norm_kv(ctx_seq),
-            self.norm_kv(ctx_seq),
-        )
-        x_seq = x_seq + attn_out
+        # Option B: project to inner_dim
+        q = self.proj_q(x_seq)      # (B, 64, inner_dim)
+        kv = self.proj_kv(ctx_seq)  # (B, 64, inner_dim)
+
+        # Cross-attention with residual
+        attn_out, _ = self.attn(self.norm_q(q), self.norm_kv(kv), self.norm_kv(kv))
+        q = q + attn_out
 
         # Feed-forward with residual
-        x_seq = x_seq + self.ff(self.norm_ff(x_seq))
+        q = q + self.ff(self.norm_ff(q))
 
-        # Reshape back and upsample to original resolution
+        # Project back to full channels
+        x_refined = self.proj_out(q)  # (B, 64, C)
+
+        # Reshape and upsample back to original resolution
         h_small = H // self.pool_factor
         w_small = W // self.pool_factor
-        x_refined = x_seq.permute(0, 2, 1).reshape(B, C, h_small, w_small)
-        x_refined = self.upsample(x_refined)   # 16×16 → 32×32
+        x_refined = x_refined.permute(0, 2, 1).reshape(B, C, h_small, w_small)
+        x_refined = self.upsample(x_refined)   # 8×8 → 32×32
 
-        # Residual onto full-resolution x5
         return x + x_refined
 
 
@@ -127,7 +130,7 @@ class SimpleUNet(nn.Module):
         self.down3 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(c3, c4))
         self.down4 = nn.Sequential(nn.MaxPool2d(2), DoubleConv(c4, c5))
 
-        # Cross-attention at bottleneck — only built when frequency channels exist
+        # Lightweight cross-attention at bottleneck
         self.freq_channel_slice = freq_channel_slice
         if freq_channel_slice is not None:
             freq_ch = freq_channel_slice[1] - freq_channel_slice[0]
@@ -158,7 +161,7 @@ class SimpleUNet(nn.Module):
         x4 = self.down3(x3)
         x5 = self.down4(x4)
 
-        # Cross-attention: bottleneck queries frequency context
+        # Lightweight cross-attention: bottleneck queries frequency context
         if self.freq_encoder is not None and self.freq_channel_slice is not None:
             freq_x = x[:, self.freq_channel_slice[0]:self.freq_channel_slice[1]]
             freq_context = self.freq_encoder(freq_x)
@@ -187,13 +190,9 @@ def build_model(model_config: ModelConfig, encoder_config: EncoderConfig) -> nn.
     if model_config.name != "simple_unet":
         raise ValueError(f"Unsupported model: {model_config.name}")
 
-    # Compute which input channels are frequency (cos/sin) based on encoder channel ordering:
-    # [RGB (0-2)] [depth (3)] [freq_cos (4)] [freq_sin (5)]
     freq_start = (3 if encoder_config.include_rgb else 0) + (1 if encoder_config.include_depth else 0)
     freq_count = int(encoder_config.include_freq_cos) + int(encoder_config.include_freq_sin)
 
-    # Only wire up the separate frequency branch when explicitly requested.
-    # Exp2 (concat) has freq channels but use_cross_attention=False → freq_slice=None.
     freq_slice = (
         (freq_start, freq_start + freq_count)
         if freq_count > 0 and model_config.use_cross_attention
