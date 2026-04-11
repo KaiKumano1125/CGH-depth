@@ -39,6 +39,7 @@ if str(SRC) not in sys.path:
 from cgh_depth.analysis import (
     evaluate_batch,
     evaluate_single_sample,
+    format_batch_summary_table,
     plot_single_comparison,
     prediction_run_from_config,
     save_batch_summary,
@@ -110,7 +111,8 @@ def compare_batch(configs: list, depths_m: list[float], output_dir: Path) -> Non
 
     print(f"\nBatch comparison CSV  : {csv_path}")
     print(f"Batch comparison plot : {plot_path}")
-    print(f"\n{dataframe.to_string(index=False)}")
+    print("\nBatch summary (mean +- std across test samples):")
+    print(format_batch_summary_table(dataframe, [run.label for run in runs]))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

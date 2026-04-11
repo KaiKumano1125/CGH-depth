@@ -226,32 +226,59 @@ def plot_single_comparison(
 def plot_hologram_grid(
     comparison: SingleComparisonResult,
     output_path: Path | None = None,
+    display_depths_mm: list[float] | None = None,
 ) -> plt.Figure:
     """
     Separate grid of reconstructed hologram images.
-    Rows = models (GroundTruth, Exp1, Exp3, ...)
-    Columns = all depths
-    """
-    depth_labels = [f"{z * 1000.0:.1f} mm" for z in comparison.depths_m]
-    row_labels = list(comparison.visuals.keys())
-    n_rows = len(row_labels)
-    n_cols = len(comparison.depths_m)
+    Rows = models (GroundTruth, then each experiment)
+    Columns = selected depths (default: first, middle, last)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2.5 * n_cols, 2.8 * n_rows))
+    display_depths_mm: pick specific depths to show, e.g. [5.0, 10.0, 15.0]
+    """
+    all_depths_mm = [z * 1000.0 for z in comparison.depths_m]
+
+    # Select which depth indices to display
+    if display_depths_mm is not None:
+        display_indices = []
+        for target in display_depths_mm:
+            closest = min(range(len(all_depths_mm)), key=lambda i: abs(all_depths_mm[i] - target))
+            if closest not in display_indices:
+                display_indices.append(closest)
+    else:
+        display_indices = sorted({0, len(comparison.depths_m) // 2, len(comparison.depths_m) - 1})
+
+    depth_labels = [f"{all_depths_mm[i]:.1f} mm" for i in display_indices]
+
+    # Row labels: "Ground Truth" for first row, experiment name for the rest
+    all_keys = list(comparison.visuals.keys())  # ["GroundTruth", "exp1_baseline", "exp3_cross_attention", ...]
+    row_display_names = []
+    for key in all_keys:
+        if key == "GroundTruth":
+            row_display_names.append("Ground Truth")
+        else:
+            row_display_names.append(key.replace("_", " ").title())
+
+    n_rows = len(all_keys)
+    n_cols = len(display_indices)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.5 * n_cols, 3.2 * n_rows))
 
     if n_rows == 1:
         axes = [axes]
     if n_cols == 1:
         axes = [[ax] for ax in axes]
 
-    for row_idx, row_label in enumerate(row_labels):
-        for col_idx, depth_label in enumerate(depth_labels):
+    for row_idx, (key, display_name) in enumerate(zip(all_keys, row_display_names)):
+        for col_idx, depth_idx in enumerate(display_indices):
             ax = axes[row_idx][col_idx]
-            ax.imshow(comparison.visuals[row_label][col_idx], cmap="gray")
+            ax.imshow(comparison.visuals[key][depth_idx], cmap="gray")
             ax.axis("off")
+            # Depth label only on top row
             if row_idx == 0:
-                ax.set_title(depth_label, fontsize=9)
-        axes[row_idx][0].set_ylabel(row_label, fontsize=9)
+                ax.set_title(depth_labels[col_idx], fontsize=11, fontweight="bold")
+        # Row label on left — bold for Ground Truth
+        weight = "bold" if key == "GroundTruth" else "normal"
+        axes[row_idx][0].set_ylabel(display_name, fontsize=10, fontweight=weight, labelpad=6)
 
     fig.suptitle(f"Reconstructed Holograms — Sample {comparison.sample_id}", fontsize=13)
     fig.tight_layout()
@@ -370,19 +397,41 @@ def plot_batch_summary(dataframe: pd.DataFrame, labels: Iterable[str], output_pa
     styles = ["o", "s", "x", "d", "^", "v"]
 
     for style, label in zip(styles, labels):
-        ax_psnr.plot(
+        psnr_mean = dataframe[f"{label}_PSNR_Mean"]
+        psnr_std = dataframe[f"{label}_PSNR_Std"]
+        ssim_mean = dataframe[f"{label}_SSIM_Mean"]
+        ssim_std = dataframe[f"{label}_SSIM_Std"]
+
+        (psnr_line,) = ax_psnr.plot(
             d_mm,
-            dataframe[f"{label}_PSNR_Mean"],
+            psnr_mean,
             f"{style}-",
             linewidth=2,
             label=label,
         )
-        ax_ssim.plot(
+        ax_psnr.fill_between(
             d_mm,
-            dataframe[f"{label}_SSIM_Mean"],
+            psnr_mean - psnr_std,
+            psnr_mean + psnr_std,
+            color=psnr_line.get_color(),
+            alpha=0.25,
+            linewidth=0,
+        )
+
+        (ssim_line,) = ax_ssim.plot(
+            d_mm,
+            ssim_mean,
             f"{style}-",
             linewidth=2,
             label=label,
+        )
+        ax_ssim.fill_between(
+            d_mm,
+            ssim_mean - ssim_std,
+            ssim_mean + ssim_std,
+            color=ssim_line.get_color(),
+            alpha=0.25,
+            linewidth=0,
         )
 
     ax_psnr.set_title("Reconstruction Quality: PSNR")
@@ -402,6 +451,29 @@ def plot_batch_summary(dataframe: pd.DataFrame, labels: Iterable[str], output_pa
         output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path, dpi=300)
     return fig
+
+
+def format_batch_summary_table(dataframe: pd.DataFrame, labels: Iterable[str] | None = None) -> str:
+    if labels is None:
+        labels = sorted(
+            {
+                column[: -len("_PSNR_Mean")]
+                for column in dataframe.columns
+                if column.endswith("_PSNR_Mean")
+            }
+        )
+
+    summary = pd.DataFrame({"z_mm": dataframe["z_mm"].map(lambda value: f"{value:.1f}")})
+    for label in labels:
+        summary[f"{label} PSNR (mean +- std)"] = [
+            f"{mean:.4f} +- {std:.4f}"
+            for mean, std in zip(dataframe[f"{label}_PSNR_Mean"], dataframe[f"{label}_PSNR_Std"])
+        ]
+        summary[f"{label} SSIM (mean +- std)"] = [
+            f"{mean:.4f} +- {std:.4f}"
+            for mean, std in zip(dataframe[f"{label}_SSIM_Mean"], dataframe[f"{label}_SSIM_Std"])
+        ]
+    return summary.to_string(index=False)
 
 
 def save_batch_summary(

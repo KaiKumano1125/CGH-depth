@@ -14,6 +14,7 @@ from cgh_depth.analysis import (
     compare_input_pair,
     evaluate_batch,
     evaluate_single_sample,
+    format_batch_summary_table,
     plot_hologram_grid,
     plot_input_pair_comparison,
     plot_single_comparison,
@@ -38,6 +39,13 @@ def main() -> None:
     parser.add_argument("--sample-id", help="Run single-sample comparison for one test index.")
     parser.add_argument("--batch", action="store_true", help="Run full batch comparison across the test set.")
     parser.add_argument("--holograms", action="store_true", help="Save a separate hologram grid image (requires --sample-id).")
+    parser.add_argument(
+        "--display-depths-mm",
+        nargs="+",
+        type=float,
+        default=[5.0, 10.0, 15.0],
+        help="Depths to show in the hologram grid (mm). Default: 5 10 15.",
+    )
     parser.add_argument("--rgb-path", help="Arbitrary RGB EXR path for qualitative model comparison.")
     parser.add_argument("--depth-path", help="Arbitrary depth EXR path for qualitative model comparison.")
     parser.add_argument(
@@ -102,7 +110,7 @@ def main() -> None:
 
         if args.holograms:
             grid_path = sample_dir / "hologram_grid.png"
-            plot_hologram_grid(comparison, grid_path)
+            plot_hologram_grid(comparison, grid_path, display_depths_mm=args.display_depths_mm)
             print(f"Saved hologram grid  : {grid_path}")
 
         for label, metrics in comparison.metrics.items():
@@ -115,6 +123,8 @@ def main() -> None:
         csv_path, plot_path = save_batch_summary(dataframe, batch_dir)
         print(f"Saved batch CSV  : {csv_path}")
         print(f"Saved batch plot : {plot_path}")
+        print("\nBatch summary (mean +- std across test samples):")
+        print(format_batch_summary_table(dataframe, [run.label for run in runs]))
 
 
 if __name__ == "__main__":

@@ -10,6 +10,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 from cgh_depth.config import load_experiment_config
 from cgh_depth.inference import predict_from_paths, predict_single, run_batch_inference
 
@@ -26,6 +29,7 @@ def main() -> None:
     parser.add_argument("--rgb-path")
     parser.add_argument("--depth-path")
     parser.add_argument("--output-stem")
+    parser.add_argument("--visualize", action="store_true", help="Also save amplitude and phase as PNG images.")
     args = parser.parse_args()
 
     config = load_experiment_config(args.config)
@@ -53,8 +57,28 @@ def main() -> None:
     phs_path = config.result_dir / f"{prefix}_{sample}_phs.exr"
     pyexr.write(str(amp_path), amp)
     pyexr.write(str(phs_path), phs)
-    print(f"Saved single-sample prediction: {amp_path}")
-    print(f"Saved single-sample prediction: {phs_path}")
+    print(f"Saved amplitude : {amp_path}")
+    print(f"Saved phase     : {phs_path}")
+
+    if args.visualize:
+        def _normalize(x: np.ndarray) -> np.ndarray:
+            x = x - x.min()
+            return x / (x.max() + 1e-8)
+
+        fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+        axes[0].imshow(_normalize(amp), cmap="gray")
+        axes[0].set_title("Predicted Amplitude")
+        axes[0].axis("off")
+        axes[1].imshow(_normalize(phs), cmap="gray")
+        axes[1].set_title("Predicted Phase")
+        axes[1].axis("off")
+        fig.suptitle(f"Sample {sample} — {config.experiment_name}", fontsize=12)
+        fig.tight_layout()
+
+        vis_path = config.result_dir / f"{prefix}_{sample}_visualization.png"
+        fig.savefig(vis_path, dpi=200)
+        plt.close(fig)
+        print(f"Saved visualization: {vis_path}")
 
 
 if __name__ == "__main__":

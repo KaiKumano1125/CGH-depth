@@ -30,10 +30,10 @@ epochs            = 100
 shuffle           = true
 num_workers       = 0
 checkpoint_every  = 10
-resume_checkpoint = ""
+resume_checkpoint = "weight/v3/exp2_concat_epoch_80.pth"
 
 [inference]
-checkpoint          = ""
+checkpoint          = "weight/v3/exp2_concat_epoch_100.pth"
 test_index          = "5799"
 batch_output_subdir = "predictions"
 prediction_prefix   = "pred_exp2"
