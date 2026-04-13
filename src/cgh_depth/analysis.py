@@ -394,57 +394,48 @@ def plot_batch_summary(dataframe: pd.DataFrame, labels: Iterable[str], output_pa
     d_mm = dataframe["z_mm"].tolist()
 
     fig, (ax_psnr, ax_ssim) = plt.subplots(1, 2, figsize=(18, 7))
-    styles = ["o", "s", "x", "d", "^", "v"]
+    styles = ["o", "s", "D", "^", "v", "x"]
 
     for style, label in zip(styles, labels):
         psnr_mean = dataframe[f"{label}_PSNR_Mean"]
-        psnr_std = dataframe[f"{label}_PSNR_Std"]
+        psnr_std  = dataframe[f"{label}_PSNR_Std"]
         ssim_mean = dataframe[f"{label}_SSIM_Mean"]
-        ssim_std = dataframe[f"{label}_SSIM_Std"]
+        ssim_std  = dataframe[f"{label}_SSIM_Std"]
 
-        (psnr_line,) = ax_psnr.plot(
-            d_mm,
-            psnr_mean,
-            f"{style}-",
+        ax_psnr.errorbar(
+            d_mm, psnr_mean,
+            yerr=psnr_std,
+            fmt=f"{style}-",
             linewidth=2,
+            markersize=6,
+            capsize=5,
+            capthick=1.5,
+            elinewidth=1.5,
             label=label,
         )
-        ax_psnr.fill_between(
-            d_mm,
-            psnr_mean - psnr_std,
-            psnr_mean + psnr_std,
-            color=psnr_line.get_color(),
-            alpha=0.25,
-            linewidth=0,
-        )
-
-        (ssim_line,) = ax_ssim.plot(
-            d_mm,
-            ssim_mean,
-            f"{style}-",
+        ax_ssim.errorbar(
+            d_mm, ssim_mean,
+            yerr=ssim_std,
+            fmt=f"{style}-",
             linewidth=2,
+            markersize=6,
+            capsize=5,
+            capthick=1.5,
+            elinewidth=1.5,
             label=label,
         )
-        ax_ssim.fill_between(
-            d_mm,
-            ssim_mean - ssim_std,
-            ssim_mean + ssim_std,
-            color=ssim_line.get_color(),
-            alpha=0.25,
-            linewidth=0,
-        )
 
-    ax_psnr.set_title("Reconstruction Quality: PSNR")
-    ax_psnr.set_xlabel("Reconstruction Distance (mm)")
-    ax_psnr.set_ylabel("PSNR (dB)")
+    ax_psnr.set_title("Reconstruction Quality: PSNR", fontsize=14)
+    ax_psnr.set_xlabel("Reconstruction Distance (mm)", fontsize=12)
+    ax_psnr.set_ylabel("PSNR (dB)", fontsize=12)
     ax_psnr.grid(True, alpha=0.3)
-    ax_psnr.legend()
+    ax_psnr.legend(fontsize=11)
 
-    ax_ssim.set_title("Reconstruction Quality: SSIM")
-    ax_ssim.set_xlabel("Reconstruction Distance (mm)")
-    ax_ssim.set_ylabel("SSIM")
+    ax_ssim.set_title("Reconstruction Quality: SSIM", fontsize=14)
+    ax_ssim.set_xlabel("Reconstruction Distance (mm)", fontsize=12)
+    ax_ssim.set_ylabel("SSIM", fontsize=12)
     ax_ssim.grid(True, alpha=0.3)
-    ax_ssim.legend()
+    ax_ssim.legend(fontsize=11)
 
     fig.tight_layout()
     if output_path is not None:
