@@ -393,54 +393,65 @@ def plot_batch_summary(dataframe: pd.DataFrame, labels: Iterable[str], output_pa
     labels = list(labels)
     d_mm = dataframe["z_mm"].tolist()
 
-    fig, (ax_psnr, ax_ssim) = plt.subplots(1, 2, figsize=(18, 7))
-    styles = ["o", "s", "D", "^", "v", "x"]
+    # ── Color / marker / style per experiment ────────────────────────────────
+    def _style_for(label: str) -> tuple[str, str, str]:
+        """Returns (color, marker, linestyle) based on label substring."""
+        lo = label.lower()
+        if any(k in lo for k in ("baseline", "exp1")):
+            return "#2166ac", "o", "-"
+        if any(k in lo for k in ("concat", "exp2")):
+            return "#d73027", "s", "-"
+        if any(k in lo for k in ("cross", "exp3")):
+            return "#1a9641", "D", "-"
+        # fallback — use matplotlib default color cycle
+        return None, "^", "-"
 
-    for style, label in zip(styles, labels):
+    fig, (ax_psnr, ax_ssim) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+
+    for label in labels:
+        color, marker, ls = _style_for(label)
         psnr_mean = dataframe[f"{label}_PSNR_Mean"]
-        psnr_std  = dataframe[f"{label}_PSNR_Std"]
         ssim_mean = dataframe[f"{label}_SSIM_Mean"]
-        ssim_std  = dataframe[f"{label}_SSIM_Std"]
 
-        ax_psnr.errorbar(
-            d_mm, psnr_mean,
-            yerr=psnr_std,
-            fmt=f"{style}-",
-            linewidth=2,
-            markersize=6,
-            capsize=5,
-            capthick=1.5,
-            elinewidth=1.5,
+        plot_kwargs = dict(
+            marker=marker,
+            linestyle=ls,
+            linewidth=2.0,
+            markersize=5,
             label=label,
         )
-        ax_ssim.errorbar(
-            d_mm, ssim_mean,
-            yerr=ssim_std,
-            fmt=f"{style}-",
-            linewidth=2,
-            markersize=6,
-            capsize=5,
-            capthick=1.5,
-            elinewidth=1.5,
-            label=label,
-        )
+        if color is not None:
+            plot_kwargs["color"] = color
 
-    ax_psnr.set_title("Reconstruction Quality: PSNR", fontsize=14)
-    ax_psnr.set_xlabel("Reconstruction Distance (mm)", fontsize=12)
+        ax_psnr.plot(d_mm, psnr_mean, **plot_kwargs)
+        ax_ssim.plot(d_mm, ssim_mean, **plot_kwargs)
+
+    # ── AP-LBM reference line (PSNR only) ────────────────────────────────────
+    ax_psnr.axhline(
+        y=27.01,
+        color="gray",
+        linestyle="--",
+        linewidth=1.2,
+        label="AP-LBM (Lee et al. 2025)",
+    )
+
+    # ── Axis formatting ───────────────────────────────────────────────────────
+    ax_psnr.set_xlim(4.5, 20.5)
+    ax_psnr.set_title("Reconstruction Quality — PSNR", fontsize=13)
     ax_psnr.set_ylabel("PSNR (dB)", fontsize=12)
-    ax_psnr.grid(True, alpha=0.3)
-    ax_psnr.legend(fontsize=11)
+    ax_psnr.grid(True, alpha=0.3, linestyle="--")
+    ax_psnr.legend(fontsize=10, bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0)
 
-    ax_ssim.set_title("Reconstruction Quality: SSIM", fontsize=14)
+    ax_ssim.set_title("Reconstruction Quality — SSIM", fontsize=13)
     ax_ssim.set_xlabel("Reconstruction Distance (mm)", fontsize=12)
     ax_ssim.set_ylabel("SSIM", fontsize=12)
-    ax_ssim.grid(True, alpha=0.3)
-    ax_ssim.legend(fontsize=11)
+    ax_ssim.grid(True, alpha=0.3, linestyle="--")
+    ax_ssim.legend(fontsize=10, bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0)
 
     fig.tight_layout()
     if output_path is not None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(output_path, dpi=300)
+        fig.savefig(output_path, dpi=300, bbox_inches="tight")
     return fig
 
 
